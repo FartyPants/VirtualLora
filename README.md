@@ -1,4 +1,7 @@
 # VirtualLora
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q5Q5MOB4M)
+
 extension for text WebUI
 
 This is to create your own collection folders to sort hundreds of LOras the way you want
