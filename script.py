@@ -66,7 +66,7 @@ def load_folder_file(filename):
     try:
         with open(path, 'r', encoding='utf-8') as file:
             file_content = file.read()
-            print(f"Tree loaded from: {path}")
+            print(f"File loaded from: {path}")
             return file_content
     except FileNotFoundError:
         print(f"The file '{path}' does not exist.")
@@ -260,6 +260,7 @@ def load_log():
 
             row_one = '<tr style="text-align: center;">'
             row_two = '<tr style="text-align: center;">'
+            epoch_str = ''
 
             for key, value in new_params.items():
 
@@ -269,18 +270,31 @@ def load_log():
                 if key=="base_model_name":
                     base_model = f"Base: {value}"
 
+                if key =="epoch":
+                    epoch_str = f'{value:.2}'
+
                 if key in keys_to_include:
                     # Create the first row with keys
-                    row_one += f'<th style="border: 1px solid gray; padding: 8px; text-align: center;">{key}</th>'
-                    value = new_params.get(key, '')
-                    if isinstance(value, float) and value < 1:
-                        value = f'{value:.1e}'
-                    elif isinstance(value, float):
-                        value = f'{value:.2}'
+                    valid = True
 
-                    row_two += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">{value}</td>'
-                    
-                    str_out+=f"{key}: {value}    "
+                    if key == "epoch_adjusted":
+                        value2 = new_params.get(key, '')
+                        epoch_str2 = f'{value2:.2}'
+                        
+                        if epoch_str==epoch_str2:
+                            valid = False
+
+                    if valid:
+                        row_one += f'<th style="border: 1px solid gray; padding: 8px; text-align: center;">{key}</th>'
+                        value = new_params.get(key, '')
+                        if isinstance(value, float) and value < 1:
+                            value = f'{value:.1e}'
+                        elif isinstance(value, float):
+                            value = f'{value:.2}'
+
+                        row_two += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">{value}</td>'
+                        
+                        str_out+=f"{key}: {value}    "
 
             row_one += '</tr>'        
             row_two += '</tr>'
@@ -536,11 +550,12 @@ def Select_last_lora():
 def ui():
     global struct_params
     global folder_tree
-    
-    text_file = load_folder_file(struct_params['selected_template'])
-    create_folder_tree(text_file)
 
     load_pickle()
+
+    text_file = load_folder_file(struct_params['selected_template'])
+
+    create_folder_tree(text_file)
 
 
     list_fold = get_folder_list(struct_params['root_SEL'])
