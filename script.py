@@ -7,6 +7,7 @@ from peft import PeftModel
 import modules.shared as shared
 from modules.LoRA import add_lora_autogptq, add_lora_exllama
 import torch
+from datetime import datetime
 
 try:
     from peft.config import PeftConfig
@@ -38,6 +39,9 @@ YELLOW = "\033[93m"
 GREEN = "\033[92m"
 RESET = "\033[0m"
 
+BYDATE = "[All By Month]"
+BYDATE2 = "[Last 10 dates]"
+
 refresh_symbol = '\U0001f504'  # 🔄
 
 
@@ -61,6 +65,15 @@ def save_folder_file(string,filename):
         print("Error occurred while saving string to file:", str(e))
 
 def load_folder_file(filename):
+
+    if filename==BYDATE:
+        file_content = create_Folders_byDate(False)
+        return file_content
+    
+    if filename==BYDATE2:
+        file_content = create_Folders_byDate(True)
+        return file_content
+    
     path = get_file_path("Templates/"+filename+".txt")
 
     try:
@@ -95,7 +108,79 @@ def get_root_list():
     root_folders = []
     for folder in folder_tree:
         root_folders.append(folder)
+
     return root_folders
+
+
+def create_Folders_byDate(last_five):
+
+# Define the root folder
+    rootFolder = shared.args.lora_dir
+    if not rootFolder.endswith('/'):
+        rootFolder += '/'
+    # Create a list to store subfolder information
+    subfolder_info = []
+    index = 0
+    print(f"Looking and sorting folders:")
+    # Walk through the root folder to get subfolders
+
+    name_list = os.listdir(rootFolder)
+    full_list = [os.path.join(rootFolder, i) for i in name_list]
+
+    for foldername in full_list:
+
+        fimename = f"{foldername}"+"/adapter_config.json"
+        
+        if os.path.exists(fimename):
+            try:
+                file_timestamp = os.path.getmtime(fimename)
+                formatted_date = datetime.fromtimestamp(file_timestamp).strftime("%Y-%m-%d-%H-%M")
+                if last_five:
+                    formatted_date_min = datetime.fromtimestamp(file_timestamp).strftime("%Y-%m-%d")
+                else:
+                    formatted_date_min = datetime.fromtimestamp(file_timestamp).strftime("%Y-%m")
+
+                # Create a dictionary for the subfolder
+            except:
+                formatted_date = "1999-00-00-00-00"
+                formatted_date_min = "Unknown"
+
+            subfolder_name = os.path.basename(foldername)
+            subfolder_dict = {
+                "subfolder": subfolder_name,
+                "date": formatted_date,
+                "date_min": formatted_date_min
+                }
+
+            subfolder_info.append(subfolder_dict)
+            index = index +1
+
+    # Sort the subfolder_info list based on the "date" key
+    subfolder_info.sort(key=lambda x: x["date"], reverse=True)
+
+    print(f" Found: {index} folders")
+
+    # Create a string to group subfolders by date
+    grouped_subfolders_string = ""
+    current_date = None
+    idx = 0
+    for subfolder in subfolder_info:
+        subfrom = subfolder["date_min"]
+        if subfrom != current_date:
+           
+            if last_five and idx>9:
+                return grouped_subfolders_string
+
+            if current_date:
+                grouped_subfolders_string += "\n"
+            current_date = subfrom
+            grouped_subfolders_string += current_date + "\n"
+            idx = idx+1
+
+
+        grouped_subfolders_string += "+ " + subfolder["subfolder"] + "\n"
+
+    return grouped_subfolders_string
 
 
 def get_folder_list(selected_root_folder):
@@ -128,6 +213,9 @@ def get_available_templates():
     sortedlist = sorted(set((k.stem for k in paths)), key=natural_keys)
     if len(sortedlist)==0:
         sortedlist = ['Latest']
+    
+    sortedlist.insert(0, BYDATE)
+    sortedlist.insert(0, BYDATE2)
 
     return sortedlist
 
@@ -224,6 +312,24 @@ def load_pickle():
     except FileNotFoundError:
         print(f"Default values, the file '{file_nameJSON}' does not exist.")
 
+def load_note():
+    selected_lora_main = struct_params["folders_SEL"]
+    if selected_lora_main=='':
+        return ""
+    
+    path = path_to_LORA(selected_lora_main,"Final")
+    full_path = Path(f"{shared.args.lora_dir}/{path}/notes.txt")
+
+    note = f'<h3 style="color: orange;">{selected_lora_main}</h3>'
+    if full_path.is_file():
+        try:
+            with open(full_path, 'r', encoding='utf-8') as file:
+                note = note+file.read()
+        except:
+            pass
+
+    return note        
+
 def load_log():
 
     selected_lora_main = struct_params["folders_SEL"]
@@ -232,78 +338,103 @@ def load_log():
     if selected_lora_main=='':
         return "None","Select LoRA"
 
-    str_out=''
+    adapter_params = None
+    new_params = None
 
     path = path_to_LORA(selected_lora_main,selected_lora_sub)
     full_path = Path(f"{shared.args.lora_dir}/{path}/training_log.json")
     full_pathAda = Path(f"{shared.args.lora_dir}/{path}/adapter_config.json")
     try:
         with open(full_pathAda, 'r') as json_file:
-            new_params = json.load(json_file)
-            keys_to_include = ['r', 'lora_alpha']
-            for key, value in new_params.items():
-                
-                if key in keys_to_include:
-                    value = new_params.get(key, '')
-                    str_out+=f"{key}: {value}    "
-    except FileNotFoundError:
-        str_out=''
+            adapter_params = json.load(json_file)
+
+    except:
+        pass
 
     str_noteline = ''
-    base_model = ''
+
     table_html = '<table>'
 
     try:
         with open(full_path, 'r') as json_file:
             new_params = json.load(json_file)
-            keys_to_include = ['base_model_name', 'loss', 'learning_rate', 'epoch', 'current_steps', 'projections', 'epoch_adjusted']
+    except FileNotFoundError: 
+        pass
 
-            row_one = '<tr style="text-align: center;">'
-            row_two = '<tr style="text-align: center;">'
-            epoch_str = ''
+    row_one = '<tr style="text-align: center;">'
+    row_two = '<tr style="text-align: center;">'
 
-            for key, value in new_params.items():
 
-                if key=='note':
-                    str_noteline = f"\nNote: {value}"
+    if new_params:    
+        keys_to_include = ['base_model_name', 'loss', 'learning_rate', 'epoch', 'current_steps', 'projections', 'epoch_adjusted']
 
-                if key=="base_model_name":
-                    base_model = f"Base: {value}"
+        epoch_str = ''
 
-                if key =="epoch":
-                    epoch_str = f'{value:.2}'
+        for key, value in new_params.items():
 
-                if key in keys_to_include:
-                    # Create the first row with keys
-                    valid = True
+            if key=='note':
+                str_noteline = f"\nNote: {value}"
 
-                    if key == "epoch_adjusted":
-                        value2 = new_params.get(key, '')
-                        epoch_str2 = f'{value2:.2}'
-                        
-                        if epoch_str==epoch_str2:
-                            valid = False
+            if key=="base_model_name":
+                base_model = f"Base: {value}"
 
-                    if valid:
-                        row_one += f'<th style="border: 1px solid gray; padding: 8px; text-align: center;">{key}</th>'
-                        value = new_params.get(key, '')
-                        if isinstance(value, float) and value < 1:
-                            value = f'{value:.1e}'
-                        elif isinstance(value, float):
-                            value = f'{value:.2}'
+            if key =="epoch":
+                epoch_str = f'{value:.2}'
 
-                        row_two += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">{value}</td>'
-                        
-                        str_out+=f"{key}: {value}    "
+            if key in keys_to_include:
+                # Create the first row with keys
+                valid = True
 
-            row_one += '</tr>'        
-            row_two += '</tr>'
-            table_html += row_one + row_two + '</table>'        
+                if key == "epoch_adjusted":
+                    value2 = new_params.get(key, '')
+                    epoch_str2 = f'{value2:.2}'
+                    
+                    if epoch_str==epoch_str2:
+                        valid = False
 
-    except FileNotFoundError:
-            table_html='No log provided'
-            str_out+='(No training log provided)'
-            
+                if valid:
+                    row_one += f'<th style="border: 1px solid gray; padding: 8px; text-align: center; background-color: #233958; color: white;">{key}</th>'
+                    value = new_params.get(key, '')
+                    if isinstance(value, float) and value < 1:
+                        value = f'{value:.1e}'
+                    elif isinstance(value, float):
+                        value = f'{value:.2}'
+
+                    row_two += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">{value}</td>'
+                    
+
+  
+    if new_params and adapter_params:
+        keys_to_include = ['r', 'lora_alpha']
+        for key, value in adapter_params.items():
+            if key in keys_to_include:
+                row_one += f'<th style="border: 1px solid gray; padding: 8px; text-align: center; background-color: #235358; color: white;">{key}</th>'
+                value = adapter_params.get(key, '')
+                if isinstance(value, float) and value < 1:
+                    value = f'{value:.1e}'
+                elif isinstance(value, float):
+                    value = f'{value:.2}'
+                row_two += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">{value}</td>'
+               
+    if new_params==None and adapter_params:
+        keys_to_include = ['base_model_name_or_path','r', 'lora_alpha', 'target_modules']
+        row_one += f'<th style="border: 1px solid gray; padding: 8px; text-align: center; background-color: #8E2438; color: white;">No log file</th>'
+        row_two += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">training_log.json</td>'
+        for key, value in adapter_params.items():
+            if key in keys_to_include:
+                row_one += f'<th style="border: 1px solid gray; padding: 8px; text-align: center; background-color: #235358; color: white;">{key}</th>'
+                value = adapter_params.get(key, '')
+                if isinstance(value, float) and value < 1:
+                    value = f'{value:.1e}'
+                elif isinstance(value, float):
+                    value = f'{value:.2}'
+                row_two += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">{value}</td>'
+                
+
+    row_one += '</tr>'        
+    row_two += '</tr>'
+    table_html += row_one + row_two + '</table>'     
+
 
     return table_html+str_noteline,"Selection changed, Press Load LORA"
 
@@ -444,7 +575,7 @@ def Load_and_apply_lora():
             if loras_before == loras_after:
                 yield "Nothing changed..." 
             else:
-                yield "Successfuly applied the new LoRA"   
+                yield f"Successfuly applied new adapter: {selected_lora_main_sub}"   
                 
         else:
             print("you have no model loaded yet!")
@@ -567,6 +698,7 @@ def ui():
         list_checkpoints = list_subfolders(model_dir)
     
     html_text,status_txt = load_log()
+    html_note = load_note()
 
     if shared.model:
         model_name = str(getattr(shared.model,'active_adapter','None'))
@@ -581,42 +713,54 @@ def ui():
 
 
         with gr.Row():
-            with gr.Column(scale=3):
+            with gr.Column():
                 with gr.Row():
-                    para_templates_drop = gr.Dropdown(choices=get_available_templates(), label='Collection Set', value=struct_params['selected_template'])
-                with gr.Row():
-                    gr.Markdown(' ')    
-            with gr.Column(scale=8):
+                    with gr.Column(scale=1):
+                        with gr.Row():
+                            para_templates_drop = gr.Dropdown(choices=get_available_templates(), label='Collection Set', value=struct_params['selected_template'])
+                        with gr.Row():
+                            gr.Markdown(' ')    
+                    with gr.Column(scale=3):
+                        gr_displayLine2 = gr.HTML(html_note)
+            with gr.Column():                    
                 gr_displayLine = gr.HTML(html_text)
 
         with gr.Row():
-            with gr.Column(scale = 2):
-                gr_ROOT_radio = gr.Radio(choices=get_root_list(), value=struct_params['root_SEL'], label='Collection',
-                                         interactive=True, elem_classes='checkboxgroup-table')
-            with gr.Column(scale = 2):
-                gr_FOLDER_radio = gr.Radio(choices=list_fold, value=struct_params['folders_SEL'], label='Folders', interactive=True, elem_classes='checkboxgroup-table')
-            with gr.Column(scale = 2):
-                gr_SUBFOLDER_radio = gr.Radio(choices=list_checkpoints, value=struct_params['subfolders_SEL'], label='Checkpoints', interactive=True, elem_classes='checkboxgroup-table')
-                
-                gr_EditName = gr.Text(value='',visible=False,label='Edit')
-                gr_EditNameSave = gr.Button(value='Rename',visible=False,variant="primary")
-                gr_EditNoteSave = gr.Button(value='Save Note',visible=False,variant="primary")
-                gr_EditNameCancel = gr.Button(value='Cancel',visible=False)
+            with gr.Column():
+                with gr.Row():    
+                    with gr.Column(scale = 1):
+                        gr_ROOT_radio = gr.Radio(choices=get_root_list(), value=struct_params['root_SEL'], label='Collection',
+                                                interactive=True, elem_classes='checkboxgroup-table')
+                    with gr.Column(scale = 3):
+                        gr_FOLDER_radio = gr.Radio(choices=list_fold, value=struct_params['folders_SEL'], label='Folders', interactive=True, elem_classes='checkboxgroup-table')
+                        gr_EditNameLora = gr.Textbox(value='',lines=4,visible=False,variant="primary")
+                        gr_EditNoteSaveLora = gr.Button(value='Save Note',visible=False,variant="primary")
+                        gr_EditNameCancelLora = gr.Button(value='Cancel',visible=False)
+            with gr.Column():
+                with gr.Row():    
+                    with gr.Column(scale = 3):
+                        gr_SUBFOLDER_radio = gr.Radio(choices=list_checkpoints, value=struct_params['subfolders_SEL'], label='Checkpoints', interactive=True, elem_classes='checkboxgroup-table')
+                        
+                        gr_EditName = gr.Text(value='',visible=False,label='Edit')
+                        gr_EditNameSave = gr.Button(value='Rename',visible=False,variant="primary")
+                        gr_EditNoteSave = gr.Button(value='Save Note',visible=False,variant="primary")
+                        gr_EditNameCancel = gr.Button(value='Cancel',visible=False)
 
-            with gr.Column(scale = 1):
-                lora_Load = gr.Button(value='Load LoRA', variant="primary")
-                lora_Add = gr.Button(value='+ Add LoRA')
-                #lora_Disable = gr.Button(value='Disable Lora',variant="stop")
-                lora_Rename = gr.Button(value='Rename CHKP')
-                lora_Note = gr.Button(value='Add/Edit Note')
+                    with gr.Column(scale = 1):
+                        lora_Load = gr.Button(value='Load LoRA', variant="primary")
+                        lora_Add = gr.Button(value='+ Add LoRA')
+                        #lora_Disable = gr.Button(value='Disable Lora',variant="stop")
+                        lora_Rename = gr.Button(value='Rename CHKP')
+                        lora_Note = gr.Button(value='Edit CHKP Note')
+                        lora_all_Note = gr.Button(value='Edit Lora Note')
 
                    
     with gr.Tab('Setup'):
         with gr.Row():
-            gr_setup_templName = gr.Textbox(label="Template Name", value=struct_params['selected_template'], lines=1)
+            gr_setup_templName = gr.Textbox(label="Set Name", value=struct_params['selected_template'], lines=1)
             gr_setup_templName2 = gr.Textbox(label="Lora Folder", value="/loras/", lines=1)
         with gr.Row():
-            gr_setup = gr.Textbox(label="Tree Template", value=text_file, lines=15, elem_classes='textbox')
+            gr_setup = gr.Textbox(label="Set Definition", value=text_file, lines=15, elem_classes='textbox')
             gr_setup_folders = gr.Textbox(label="Folders", value='', lines=15, elem_classes=['textbox', 'add_scrollbar'])
         with gr.Row():  
             gr.Markdown('')
@@ -695,7 +839,11 @@ def ui():
 
     gr_ROOT_radio.change(lambda x: struct_params.update({"root_SEL": x}), gr_ROOT_radio, None).then(update_folders, None, gr_FOLDER_radio, show_progress=False)
 
-    gr_FOLDER_radio.change(lambda x: struct_params.update({"folders_SEL": x}), gr_FOLDER_radio, None).then(update_lotra_subs, None, gr_SUBFOLDER_radio, show_progress=False).then(load_log,None,[gr_displayLine,status_text], show_progress=False)
+    gr_FOLDER_radio.change(lambda x: struct_params.update({"folders_SEL": x}), gr_FOLDER_radio, None).then(
+        update_lotra_subs, None, gr_SUBFOLDER_radio, show_progress=False).then(
+        load_note,None,gr_displayLine2, show_progress=False).then(
+        load_log,None,[gr_displayLine,status_text], show_progress=False)
+        
 
     gr_SUBFOLDER_radio.change(lambda x: struct_params.update({"subfolders_SEL": x}), gr_SUBFOLDER_radio, None).then(load_log,None,[gr_displayLine,status_text], show_progress=False)
 
@@ -806,6 +954,41 @@ def ui():
 
     gr_EditNoteSave.click(save_note,gr_EditName,[gr_displayLine,gr_EditName,gr_EditNoteSave,gr_EditNameCancel]).then(update_lotra_subs, None, gr_SUBFOLDER_radio, show_progress=False).then(load_log,None,[gr_displayLine,status_text], show_progress=False)
     lora_Note.click(show_edit_Note,None,[gr_EditName,gr_EditNoteSave,gr_EditNameCancel])
+
+
+    def show_edit_NoteLora():
+        selected_lora_main = struct_params["folders_SEL"]
+        path = path_to_LORA(selected_lora_main, "Final")
+
+        full_path = Path(f"{shared.args.lora_dir}/{path}/notes.txt")
+
+        note = 'Write a note here...'
+        try:
+            with open(full_path, 'r', encoding='utf-8') as file:
+                note = file.read()
+        except:
+            pass
+
+        return gr.Textbox.update(value = note, interactive= True, visible=True),gr.Button.update(visible=True),gr.Button.update(visible=True)
+
+    def save_note_LORA(line):
+        selected_lora_main = struct_params["folders_SEL"]
+        path = path_to_LORA(selected_lora_main, "Final")
+        full_path = Path(f"{shared.args.lora_dir}/{path}/notes.txt")
+
+
+        line_str = f"{line}"        
+        if line_str != 'Write a note here...':
+            try:
+                with open(full_path, 'w', encoding='utf-8') as file:
+                    file.write(line_str)
+            except:
+                pass
+
+    lora_all_Note.click(show_edit_NoteLora,None,[gr_EditNameLora,gr_EditNoteSaveLora,gr_EditNameCancelLora])
+    gr_EditNameCancelLora.click(show_cancel,None,[gr_EditNameLora,gr_EditNoteSaveLora,gr_EditNameCancelLora,gr_EditNoteSave])
+    gr_EditNoteSaveLora.click(save_note_LORA,gr_EditNameLora, None).then(
+        show_cancel,None,[gr_EditNameLora,gr_EditNoteSaveLora,gr_EditNameCancelLora,gr_EditNoteSave]).then(load_note,None,gr_displayLine2)
 
     def update_activeAdapters():
         choice = get_available_adapters_ui()
