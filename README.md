@@ -12,7 +12,7 @@ It has to be in extensions/VirtualLora
 
 This is to create your own collection folders to sort hundreds of LOras the way you want
 
-# custom Sets
+# Custom Sets
 
 You create the tree by simpply writing a template txt file (collection set). You can have many of these collection sets and each will have an root items (like a virtual folder) then the actual LORA folders.
 
