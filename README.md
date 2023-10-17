@@ -18,17 +18,17 @@ You can create the collection tree by simpply writing a template txt file (colle
 
 example of collection set:
 
+```
+CodeLlama
++ L2-Sydney_UASST_CodeLlama_v2
++ L2-Sydney_UASST_CodeLlama_BAD
 
->CodeLlama
->+ L2-Sydney_UASST_CodeLlama_v2
->+ L2-Sydney_UASST_CodeLlama_BAD
->
->Llama 2
->+ Sydney_V4_LLaMA2_Base_S_UASST_512
->
->Mix
->+ L1-CAS_radio_Sydney_128_v4
+Llama 2
++ Sydney_V4_LLaMA2_Base_S_UASST_512
 
+Mix
++ L1-CAS_radio_Sydney_128_v4
+```
 
 
 ![image](https://github.com/FartyPants/VirtualLora/assets/23346289/c952ab9e-0113-4213-99a5-5c8bee4e9543)
