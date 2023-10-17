@@ -29,7 +29,7 @@ Llama 2
 Mix
 + L1-CAS_radio_Sydney_128_v4
 ```
-This will display three folders in Root:
+This will display three folders in Root (Collections) column:
 
 - CodeLlama
 - Llama 2
