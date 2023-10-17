@@ -29,6 +29,11 @@ Llama 2
 Mix
 + L1-CAS_radio_Sydney_128_v4
 ```
+This will display three folders in Root:
+
+CodeLlama
+Llama 2
+Mix
 
 
 ![image](https://github.com/FartyPants/VirtualLora/assets/23346289/c952ab9e-0113-4213-99a5-5c8bee4e9543)
