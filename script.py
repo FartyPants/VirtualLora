@@ -733,7 +733,7 @@ def ui():
                                                 interactive=True, elem_classes='checkboxgroup-table')
                     with gr.Column(scale = 3):
                         gr_FOLDER_radio = gr.Radio(choices=list_fold, value=struct_params['folders_SEL'], label='Folders', interactive=True, elem_classes='checkboxgroup-table')
-                        gr_EditNameLora = gr.Textbox(value='',lines=4,visible=False,variant="primary")
+                        gr_EditNameLora = gr.Textbox(value='',lines=4,visible=False,variant="primary", label='Edit LORA Note')
                         gr_EditNoteSaveLora = gr.Button(value='Save Note',visible=False,variant="primary")
                         gr_EditNameCancelLora = gr.Button(value='Cancel',visible=False)
             with gr.Column():
@@ -742,8 +742,8 @@ def ui():
                         gr_SUBFOLDER_radio = gr.Radio(choices=list_checkpoints, value=struct_params['subfolders_SEL'], label='Checkpoints', interactive=True, elem_classes='checkboxgroup-table')
                         
                         gr_EditName = gr.Text(value='',visible=False,label='Edit')
-                        gr_EditNameSave = gr.Button(value='Rename',visible=False,variant="primary")
-                        gr_EditNoteSave = gr.Button(value='Save Note',visible=False,variant="primary")
+                        gr_EditNameSave = gr.Button(value='Rename',visible=False,variant="primary", label='Edit Checkpoint Name')
+                        gr_EditNoteSave = gr.Button(value='Save Note',visible=False,variant="primary", label='Edit Checkpoint Note')
                         gr_EditNameCancel = gr.Button(value='Cancel',visible=False)
 
                     with gr.Column(scale = 1):
