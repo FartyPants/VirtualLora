@@ -8,6 +8,7 @@ import modules.shared as shared
 from modules.LoRA import add_lora_autogptq, add_lora_exllama
 import torch
 from datetime import datetime
+from functools import partial
 
 try:
     from peft.config import PeftConfig
@@ -44,6 +45,7 @@ BYDATE2 = "[Last 10 dates]"
 
 refresh_symbol = '\U0001f504'  # 🔄
 
+str_status_text = 'Ready'
 
 def get_file_path(filename):
     basepath = "extensions/VirtualLora/"+filename
@@ -436,7 +438,7 @@ def load_log():
     table_html += row_one + row_two + '</table>'     
 
 
-    return table_html+str_noteline,"Selection changed, Press Load LORA"
+    return table_html+str_noteline
 
 def get_loaded_adapters():
     prior_set = []
@@ -489,18 +491,21 @@ def add_lora_to_model(lora_name):
         print(f"Applying the following LoRAs to {shared.model_name}: {lora_name}")
 
         lora_path = Path(f"{shared.args.lora_dir}/{lora_name}")
-        
-        shared.model = PeftModel.from_pretrained(shared.model,  lora_path, adapter_name=lora_name, **params)
-        
+        lora_path_bin = Path(f"{shared.args.lora_dir}/{lora_name}/adapter_model.bin")
 
-        if not shared.args.load_in_8bit and not shared.args.cpu:
-            shared.model.half()
-            if not hasattr(shared.model, "hf_device_map"):
-                if torch.backends.mps.is_available():
-                    device = torch.device('mps')
-                    shared.model = shared.model.to(device)
-                else:
-                    shared.model = shared.model.cuda()
+        
+        if lora_path_bin.is_file():
+            shared.model = PeftModel.from_pretrained(shared.model,  lora_path, adapter_name=lora_name, **params)
+            if not shared.args.load_in_8bit and not shared.args.cpu:
+                shared.model.half()
+                if not hasattr(shared.model, "hf_device_map"):
+                    if torch.backends.mps.is_available():
+                        device = torch.device('mps')
+                        shared.model = shared.model.to(device)
+                    else:
+                        shared.model = shared.model.cuda()
+        else:
+            print(f"{RED}Adapter file (adapter_model.bin) doesn't exist in {RESET}{lora_path}")          
 
 
 def Load_and_apply_lora():
@@ -558,6 +563,8 @@ def Load_and_apply_lora():
             if hasattr(shared.model.base_model, 'model'):
                 modelbasetype = shared.model.base_model.model.__class__.__name__
                 print(f"{GREEN}[OK] {RESET} Model {YELLOW}{modeltype}{RESET} created on top of {YELLOW}{modelbasetype}{RESET} with {GREEN}{selected_lora_main_sub}{RESET}")
+                adapter_name = getattr(shared.model,'active_adapter','None')
+                print (f"{YELLOW}Active adapter:{RESET} {adapter_name}")                  
             else: 
                 print(f"{RED}Error - no PEFT model created for{RESET} {YELLOW}{modeltype}{RESET}")
 
@@ -581,8 +588,7 @@ def Load_and_apply_lora():
             print("you have no model loaded yet!")
             yield 'No Model loaded...' 
         
-        adapter_name = getattr(shared.model,'active_adapter','None')
-        print (f"{YELLOW}Active adapter:{RESET} {adapter_name}")      
+    
 
 def add_lora_to_PEFT():
 
@@ -697,7 +703,7 @@ def ui():
         model_dir = f"{shared.args.lora_dir}/{selected_lora_main}"  # Update with the appropriate directory path
         list_checkpoints = list_subfolders(model_dir)
     
-    html_text,status_txt = load_log()
+    html_text = load_log()
     html_note = load_note()
 
     if shared.model:
@@ -733,7 +739,7 @@ def ui():
                                                 interactive=True, elem_classes='checkboxgroup-table')
                     with gr.Column(scale = 3):
                         gr_FOLDER_radio = gr.Radio(choices=list_fold, value=struct_params['folders_SEL'], label='Folders', interactive=True, elem_classes='checkboxgroup-table')
-                        gr_EditNameLora = gr.Textbox(value='',lines=4,visible=False,variant="primary", label='Edit LORA Note')
+                        gr_EditNameLora = gr.Textbox(value='',lines=4,visible=False, label='Edit LORA Note')
                         gr_EditNoteSaveLora = gr.Button(value='Save Note',visible=False,variant="primary")
                         gr_EditNameCancelLora = gr.Button(value='Cancel',visible=False)
             with gr.Column():
@@ -749,10 +755,13 @@ def ui():
                     with gr.Column(scale = 1):
                         lora_Load = gr.Button(value='Load LoRA', variant="primary")
                         lora_Add = gr.Button(value='+ Add LoRA')
+                        gr.Markdown(' ')
                         #lora_Disable = gr.Button(value='Disable Lora',variant="stop")
-                        lora_Rename = gr.Button(value='Rename CHKP')
-                        lora_Note = gr.Button(value='Edit CHKP Note')
-                        lora_all_Note = gr.Button(value='Edit Lora Note')
+                        lora_Rename = gr.Button(value='Rename Checkpoint')
+                        lora_Note = gr.Button(value='Edit Checkpoint Note')
+                        lora_all_Note = gr.Button(value='Edit Folder Note')
+                        gr.Markdown(' ')
+                        refresh_all = gr.Button(value='Refresh', variant="secondary")
 
                    
     with gr.Tab('Setup'):
@@ -772,7 +781,7 @@ def ui():
             gr_setup_REFRESH = gr.Button("Refresh")
 
     with gr.Row():
-        status_text = gr.Markdown(value='Ready')
+        status_text = gr.Markdown(value=str_status_text)
 
     def update_folders():
         value = struct_params['root_SEL']
@@ -820,6 +829,14 @@ def ui():
 
         return '\n'.join(folder)
 
+    def write_status(text):
+        global str_status_text
+        str_status_text = text
+        return text
+    
+    def writelast_status():
+        global str_status_text
+        return str_status_text
 
     gr_setup_REFRESH.click(refresh_Lorafolders,gr_setup_search, gr_setup_folders)
 
@@ -832,20 +849,24 @@ def ui():
         if selected_lora_main !='' and selected_lora_main!="None":
             model_dir = f"{shared.args.lora_dir}/{selected_lora_main}"  # Update with the appropriate directory path
             subfolders = list_subfolders(model_dir)
-            struct_params['subfolders_SEL'] = "Final"
-            return gr.Radio.update(choices=subfolders, value ='Final') 
+            struct_params['subfolders_SEL'] = 'Final'
+            return gr.Radio.update(choices=subfolders, value =struct_params['subfolders_SEL']) 
 
         return gr.Radio.update(choices=[], value ='')    
+
 
     gr_ROOT_radio.change(lambda x: struct_params.update({"root_SEL": x}), gr_ROOT_radio, None).then(update_folders, None, gr_FOLDER_radio, show_progress=False)
 
     gr_FOLDER_radio.change(lambda x: struct_params.update({"folders_SEL": x}), gr_FOLDER_radio, None).then(
         update_lotra_subs, None, gr_SUBFOLDER_radio, show_progress=False).then(
         load_note,None,gr_displayLine2, show_progress=False).then(
-        load_log,None,[gr_displayLine,status_text], show_progress=False)
+        load_log,None,gr_displayLine, show_progress=False).then(
+        partial(write_status, text='Selection changed'),None,status_text,show_progress=False)
         
 
-    gr_SUBFOLDER_radio.change(lambda x: struct_params.update({"subfolders_SEL": x}), gr_SUBFOLDER_radio, None).then(load_log,None,[gr_displayLine,status_text], show_progress=False)
+    gr_SUBFOLDER_radio.change(lambda x: struct_params.update({"subfolders_SEL": x}), gr_SUBFOLDER_radio, None).then(
+        load_log,None,gr_displayLine, show_progress=False).then(
+        partial(write_status, text='Selection changed'),None,status_text,show_progress=False)
 
     def show_edit_rename():
         selected_lora_sub = struct_params['subfolders_SEL'] 
@@ -896,6 +917,7 @@ def ui():
             os.rename(full_path, full_newpath)
             print(f"Renamed '{selected_lora_sub}' to '{line}'")
             note = f"Renamed '{selected_lora_sub}' to '{line}'"
+            struct_params['subfolders_SEL'] = line
         except FileNotFoundError:
             print(f"Error: The '{full_path}' does not exist.")
         except PermissionError:
@@ -947,12 +969,32 @@ def ui():
         
         return gr.Textbox.update(value = note, interactive= True, visible=True),gr.Textbox.update(visible=False),gr.Button.update(visible=False),gr.Button.update(visible=False)
 
+    def refresh_lotra_subs():
+        global struct_params
+        selected_lora_main = struct_params["folders_SEL"]
+        if selected_lora_main !='' and selected_lora_main!="None":
+            model_dir = f"{shared.args.lora_dir}/{selected_lora_main}"  # Update with the appropriate directory path
+            subfolders = list_subfolders(model_dir)
+            if struct_params['subfolders_SEL'] not in list_checkpoints:
+                struct_params['subfolders_SEL'] = 'Final'
+            
+            return gr.Radio.update(choices=subfolders, value =struct_params['subfolders_SEL']) 
+
+        return gr.Radio.update(choices=[], value ='')   
+
     gr_EditNameCancel.click(show_cancel,None,[gr_EditName,gr_EditNameSave,gr_EditNameCancel,gr_EditNoteSave])
-    gr_EditNameSave.click(rename_chkp,gr_EditName,[gr_displayLine,gr_EditName,gr_EditNameSave,gr_EditNameCancel]).then(update_lotra_subs, None, gr_SUBFOLDER_radio, show_progress=False).then(load_log,None,[gr_displayLine,status_text], show_progress=False)
+    gr_EditNameSave.click(rename_chkp,gr_EditName,[gr_displayLine,gr_EditName,gr_EditNameSave,gr_EditNameCancel]).then(
+        refresh_lotra_subs, None, gr_SUBFOLDER_radio, show_progress=False).then(
+        load_log,None,gr_displayLine, show_progress=False).then(
+        partial(write_status, text='Renamed'),None,status_text,show_progress=False)
+    
     lora_Rename.click(show_edit_rename,None,[gr_EditName,gr_EditNameSave,gr_EditNameCancel])
 
 
-    gr_EditNoteSave.click(save_note,gr_EditName,[gr_displayLine,gr_EditName,gr_EditNoteSave,gr_EditNameCancel]).then(update_lotra_subs, None, gr_SUBFOLDER_radio, show_progress=False).then(load_log,None,[gr_displayLine,status_text], show_progress=False)
+    gr_EditNoteSave.click(save_note,gr_EditName,[gr_displayLine,gr_EditName,gr_EditNoteSave,gr_EditNameCancel]).then(
+        load_log,None,gr_displayLine, show_progress=False).then(
+        partial(write_status, text='Checkpoint Note Saved'),None,status_text,show_progress=False)
+    
     lora_Note.click(show_edit_Note,None,[gr_EditName,gr_EditNoteSave,gr_EditNameCancel])
 
 
@@ -987,8 +1029,11 @@ def ui():
 
     lora_all_Note.click(show_edit_NoteLora,None,[gr_EditNameLora,gr_EditNoteSaveLora,gr_EditNameCancelLora])
     gr_EditNameCancelLora.click(show_cancel,None,[gr_EditNameLora,gr_EditNoteSaveLora,gr_EditNameCancelLora,gr_EditNoteSave])
+    
     gr_EditNoteSaveLora.click(save_note_LORA,gr_EditNameLora, None).then(
-        show_cancel,None,[gr_EditNameLora,gr_EditNoteSaveLora,gr_EditNameCancelLora,gr_EditNoteSave]).then(load_note,None,gr_displayLine2)
+        show_cancel,None,[gr_EditNameLora,gr_EditNoteSaveLora,gr_EditNameCancelLora,gr_EditNoteSave]).then(
+        load_note,None,gr_displayLine2).then(
+        partial(write_status, text='Folder Note Saved'),None,status_text,show_progress=False)
 
     def update_activeAdapters():
         choice = get_available_adapters_ui()
@@ -1000,9 +1045,11 @@ def ui():
         return gr.Radio.update(choices=choice, value= cur_adapt)
 
 
-    lora_Load.click(Load_and_apply_lora,None,status_text).then(save_pickle,None,None).then(update_activeAdapters,None, gr_Loralmenu) 
+    lora_Load.click(Load_and_apply_lora,None,status_text).then(save_pickle,None,None).then(
+        update_activeAdapters,None, gr_Loralmenu) 
 
-    lora_Add.click(add_lora_to_PEFT,None,status_text).then(save_pickle,None,None).then(update_activeAdapters,None, gr_Loralmenu)
+    lora_Add.click(add_lora_to_PEFT,None,status_text).then(save_pickle,None,None).then(
+        update_activeAdapters,None, gr_Loralmenu)
 
     gr_Loralmenu_refresh.click(update_activeAdapters,None, gr_Loralmenu)
 
@@ -1011,6 +1058,35 @@ def ui():
 
     gr_setup_byDate.change(lambda x: struct_params.update({"sort_by_date": x}), gr_setup_byDate, None) 
 
+
+    gr_setup_APPLY.click(save_template, [gr_setup,gr_setup_templName], None).then(
+        reload_tree, None, [gr_ROOT_radio, gr_FOLDER_radio, gr_SUBFOLDER_radio,gr_setup,gr_setup_templName]).then(
+        update_dropdown,None,para_templates_drop)
+
+    def reload_tree_all():
+        global struct_params
+        textfile = load_folder_file(struct_params['selected_template'])
+        create_folder_tree(textfile)
+        choices = get_root_list()
+        list_fold = get_folder_list(struct_params['root_SEL'])
+        list_checkpoints = []
+        selected_lora_main = struct_params["folders_SEL"]
+        if selected_lora_main !='' and selected_lora_main!="None":
+            model_dir = f"{shared.args.lora_dir}/{selected_lora_main}"  
+            list_checkpoints = list_subfolders(model_dir)
+            if struct_params['subfolders_SEL'] not in list_checkpoints:
+                struct_params['subfolders_SEL'] = 'FInal'
+
+        return gr.Radio.update(choices=choices, value=struct_params['root_SEL']), gr.Radio.update(choices=list_fold, value=struct_params['folders_SEL']), gr.Radio.update(choices=list_checkpoints, value=struct_params['subfolders_SEL'])
+
+
+    refresh_all.click(update_dropdown,None,para_templates_drop).then(
+        reload_tree_all, None, [gr_ROOT_radio, gr_FOLDER_radio, gr_SUBFOLDER_radio]).then(
+        update_activeAdapters,None, gr_Loralmenu).then(
+        load_note,None,gr_displayLine2).then(
+        load_log,None,gr_displayLine).then(
+        partial(write_status, text='Refreshed'),None,status_text)
+     
 
 
     #gr_set_ROOT.change(lambda x: struct_params.update({"root_folders": x}), gr_set_ROOT, None)
