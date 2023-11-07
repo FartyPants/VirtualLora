@@ -24,7 +24,7 @@ CodeLlama
 + L2-Sydney_UASST_CodeLlama_BAD
 
 Llama 2
-+ Sydney_V4_LLaMA2_Base_S_UASST_512
++ Sydney_V4_LLaMA2_Base_S_UASST_512  #Some comment about the LORA
 
 Mix
 + L1-CAS_radio_Sydney_128_v4
@@ -35,10 +35,11 @@ This will display three folders in Root (Collections) column:
 - Llama 2
 - Mix
 
-
 ![image](https://github.com/FartyPants/VirtualLora/assets/23346289/c952ab9e-0113-4213-99a5-5c8bee4e9543)
 
+You can add comments to the each lora with # 
 
++ Sydney_V4_LLaMA2_Base_S_UASST_512  #Needs some more testing
 
 
 
