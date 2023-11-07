@@ -5,7 +5,7 @@ from pathlib import Path
 import json
 from peft import PeftModel
 import modules.shared as shared
-from modules.LoRA import add_lora_autogptq, add_lora_exllama
+from modules.LoRA import add_lora_autogptq, add_lora_exllama, add_lora_exllamav2
 import torch
 from datetime import datetime
 from functools import partial
@@ -25,6 +25,7 @@ params = {
 g_print_twice = False
 
 folder_tree = {}
+comments = {}
 
 struct_params = {
     "edit": True,
@@ -87,17 +88,43 @@ def load_folder_file(filename):
         print(f"The file '{path}' does not exist.")
         return ""
 
+def get_comment(subfolder_name):
+    global folder_tree
+    global comments
+    comment = ''
+
+    try:
+        if subfolder_name in comments:
+            # Display comment for the subfolder
+            comment = comments[subfolder_name]
+            #print(f"Comment for '{subfolder_name}' (inside '{folder_name}'): {comment}")
+    except KeyError:
+        pass
+
+    return comment    
+
+
+
 def create_folder_tree(input_string):
     global folder_tree
+    global comments
     folder_tree = {}
+    comments = {}
+
     lines = input_string.split('\n')
     current_folder = None
     for line in lines:
+        # Remove any comment (if present) by splitting the line at the '#' character
+        parts = line.split(' #', 1)
+        line = parts[0]
+        comment = parts[1].strip() if len(parts) > 1 else ''
         if line.startswith('+'):
             if current_folder is not None:
                 newline = line[1:]
                 newline = newline.strip()
                 folder_tree[current_folder].append(newline)
+                comments[newline] = comment
+                 
         else:
             line = line.strip()
             if line != '':
@@ -332,6 +359,78 @@ def load_note():
 
     return note        
 
+def display_comment():
+    selected_lora_main = struct_params["folders_SEL"]
+    if selected_lora_main=='':
+        return ""
+
+    comment = get_comment(selected_lora_main)
+
+    return comment
+
+def load_training_param():
+
+    selected_lora_main = struct_params["folders_SEL"]
+    selected_lora_sub = struct_params['subfolders_SEL'] 
+    
+    if selected_lora_main=='':
+        return "No Lora selected in Folder column"
+
+    table_html = '<table>'
+
+    path = path_to_LORA(selected_lora_main,"Final")
+    full_path = Path(f"{shared.args.lora_dir}/{path}/training_parameters.json")
+ 
+
+    try:
+        with open(full_path, 'r') as json_file:
+            new_params = json.load(json_file)
+    except FileNotFoundError:
+        new_params = {}  # Initialize as an empty dictionary if the file is not found
+
+    # Define the keys you want to include in the table
+    keys_to_include = ['dataset', 'raw_text_file', 'format', 'micro_batch_size', 'grad_accumulation', 'epochs', 'learning_rate', 'lora_rank','lora_alpha', 'cutoff_len','add_bos_token', 'add_eos_token']
+    keys_to_rename = ['JSON','TXT', 'format', 'batch', 'GA', 'epochs', 'LR','r','alpha','cutoff','BOS','EOS',]
+    
+    pastel_colors = [
+        '#FFC3A0',  # Light Orange
+        '#FF677D',  # Light Pink
+        '#D4A5A5',  # Pale Pink
+        '#9A8C98',  # Light Gray
+        '#90A8A4',  # Pale Teal
+        '#ABC7B2',  # Soft Green
+        '#E4F9B4',  # Light Yellow
+        '#FFD1DC',  # Pastel Pink
+        '#B5EAD7',  # Seafoam Green
+        '#FFE156',  # Pastel Yellow
+        '#A9E6E3',  # Pale Blue-Green
+        '#F5D9C3'  # Peach
+    ]
+    # Create table header
+    header_row = '<tr style="text-align: center;">'
+    for i, key in enumerate(keys_to_include):
+        newkey = keys_to_rename[i]
+        background_color = pastel_colors[i % len(pastel_colors)]  # Cycle through pastel colors
+        header_row += f'<th style="border: 1px solid gray; padding: 8px; text-align: center; background-color: {background_color}; color: black;">{newkey}</th>'
+
+    header_row += '</tr>'
+    table_html += header_row
+
+    # Create table data rows
+    data_row = '<tr style="text-align: center;">'
+    for key in keys_to_include:
+        value = new_params.get(key, '')
+        if isinstance(value, float) and value < 1:
+            value = f'{value:.1e}'
+        elif isinstance(value, float):
+            value = f'{value:.2f}'
+        data_row += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">{value}</td>'
+    data_row += '</tr>'
+    table_html += data_row
+
+    table_html += '</table>'  
+    return table_html  
+
 def load_log():
 
     selected_lora_main = struct_params["folders_SEL"]
@@ -464,19 +563,21 @@ def get_available_adapters_ui():
             
             if index == 1:
                 print(RED+"  [None]"+RESET)
-        else:
-            print(f'({shared.model_name} is not PEFT model)')
 
     else:
         print('(no model loaded yet)')
 
     return prior_set      
 
+
+
 def add_lora_to_model(lora_name):
     if 'GPTQForCausalLM' in shared.model.__class__.__name__ or shared.args.loader == 'AutoGPTQ':
         add_lora_autogptq([lora_name])
     elif shared.model.__class__.__name__ in ['ExllamaModel', 'ExllamaHF'] or shared.args.loader == 'ExLlama':
         add_lora_exllama([lora_name])
+    elif shared.model.__class__.__name__ in ['Exllamav2Model', 'Exllamav2HF'] or shared.args.loader == ['ExLlamav2', 'ExLlamav2_HF']:
+        add_lora_exllamav2([lora_name])
     else:
         
         params = {}
@@ -495,7 +596,8 @@ def add_lora_to_model(lora_name):
 
         
         if lora_path_bin.is_file():
-            shared.model = PeftModel.from_pretrained(shared.model,  lora_path, adapter_name=lora_name, **params)
+            safeloraname = lora_name.replace('.', '_')
+            shared.model = PeftModel.from_pretrained(shared.model,  lora_path, adapter_name=safeloraname, **params)
             if not shared.args.load_in_8bit and not shared.args.cpu:
                 shared.model.half()
                 if not hasattr(shared.model, "hf_device_map"):
@@ -525,15 +627,16 @@ def Load_and_apply_lora():
             shared.lora_names = []
             loras_before = get_loaded_adapters()
 
-
-            if 'GPTQForCausalLM' in shared.model.__class__.__name__:
+            
+            if 'GPTQForCausalLM' in shared.model.__class__.__name__ or shared.args.loader == 'AutoGPTQ':
                 print("LORA -> AutoGPTQ")
-            elif shared.model.__class__.__name__ == 'ExllamaModel':
+            elif shared.model.__class__.__name__ in ['ExllamaModel', 'ExllamaHF'] or shared.args.loader == 'ExLlama':
                 print("LORA -> Exllama")
+            elif shared.model.__class__.__name__ in ['Exllamav2Model', 'Exllamav2HF'] or shared.args.loader == ['ExLlamav2', 'ExLlamav2_HF']:
+                print("LORA -> Exllama V2")                
             else:
                         # shared.model may no longer be PeftModel
-                print("LORA -> Transformers") 
-
+                print("LORA -> Transformers [PEFT]") 
 
                 if hasattr(shared.model, 'disable_adapter'):
                     print (RED+"Disable PEFT adapter"+RESET)  
@@ -543,47 +646,50 @@ def Load_and_apply_lora():
                     
                 modeltype = shared.model.__class__.__name__
 
-                if hasattr(shared.model.base_model, 'model'):
-                    modelbasetype = shared.model.base_model.model.__class__.__name__
+                if hasattr(shared.model, 'base_model'):
+                    if hasattr(shared.model.base_model, 'model'):
+                        modelbasetype = shared.model.base_model.model.__class__.__name__
 
-                    print(f"Returning  model {YELLOW}{modeltype}{RESET} back to {YELLOW}{modelbasetype}{RESET}") 
-                    shared.model = shared.model.base_model.model
+                        print(f"Returning  model {YELLOW}{modeltype}{RESET} back to {YELLOW}{modelbasetype}{RESET}") 
+                        shared.model = shared.model.base_model.model
+                    else:
+                        print(f"Starting from {YELLOW}clean{RESET} model {YELLOW}{modeltype}{RESET}") 
                 else:
-                    print(f"Starting from {YELLOW}clean{RESET} model {YELLOW}{modeltype}{RESET}") 
+                    print(f"Note: {modeltype} has no base_model") 
 
-
-            modeltype = shared.model.__class__.__name__
-
-            print(f"Creating {RED}PEFT{RESET} model for {YELLOW}{modeltype}{RESET}")
+                modeltype = shared.model.__class__.__name__
+                print(f"Creating {RED}PEFT{RESET} model for {YELLOW}{modeltype}{RESET}")
 
             #if len(loras_before) == 0:
             add_lora_to_model(selected_lora_main_sub)
             modeltype = shared.model.__class__.__name__
-
-            if hasattr(shared.model.base_model, 'model'):
-                modelbasetype = shared.model.base_model.model.__class__.__name__
-                print(f"{GREEN}[OK] {RESET} Model {YELLOW}{modeltype}{RESET} created on top of {YELLOW}{modelbasetype}{RESET} with {GREEN}{selected_lora_main_sub}{RESET}")
-                adapter_name = getattr(shared.model,'active_adapter','None')
-                print (f"{YELLOW}Active adapter:{RESET} {adapter_name}")                  
-            else: 
-                print(f"{RED}Error - no PEFT model created for{RESET} {YELLOW}{modeltype}{RESET}")
-
-            #Select_last_lora()
-
-            #else: 
-            #    reload_model()
-            #    add_lora_to_model(selected_lora_main_sub)
-
             
-            #delete_All_loraButActive()
-
-            loras_after =  get_loaded_adapters()
-            
-            if loras_before == loras_after:
-                yield "Nothing changed..." 
+            if hasattr(shared.model, 'base_model'):    
+                if hasattr(shared.model.base_model, 'model'):
+                    modelbasetype = shared.model.base_model.model.__class__.__name__
+                    print(f"{GREEN}[OK] {RESET} Model {YELLOW}{modeltype}{RESET} created on top of {YELLOW}{modelbasetype}{RESET} with {GREEN}{selected_lora_main_sub}{RESET}")
+                    adapter_name = getattr(shared.model,'active_adapter','None')
+                    print (f"{YELLOW}Active adapter:{RESET} {adapter_name}")                  
+                else: 
+                    print(f"{RED}Error - no PEFT model created for{RESET} {YELLOW}{modeltype}{RESET}")
             else:
-                yield f"Successfuly applied new adapter: {selected_lora_main_sub}"   
+                print(f"Model {YELLOW}{modeltype}{RESET} with {GREEN}{selected_lora_main_sub}{RESET}")
+                adapter_name = getattr(shared.model,'active_adapter','')
+                if adapter_name!='':
+                    print (f"{YELLOW}Active adapter:{RESET} {adapter_name}")
+                else:
+                    print (f"Note: {YELLOW}{modeltype}:{RESET} has no support for switching adapters")
+
+
+            if hasattr(shared.model, 'set_adapter'):
+                loras_after =  get_loaded_adapters()
                 
+                if loras_before == loras_after:
+                    yield "Nothing changed..." 
+                else:
+                    yield f"Successfuly applied new adapter: {selected_lora_main_sub}"   
+            else:
+                yield f"Applied adapter: {selected_lora_main_sub}" 
         else:
             print("you have no model loaded yet!")
             yield 'No Model loaded...' 
@@ -607,14 +713,15 @@ def add_lora_to_PEFT():
         
         loras_before = get_loaded_adapters()
         if len(loras_before) == 0:
-                yield (f"First lora needs to be loaded with Load Lora")     
+            yield (f"First lora needs to be loaded with Load Lora")     
         else:    
             if shared.model_name!='None' and shared.model_name!='':
                 yield (f"Adding the following LoRAs to {shared.model_name} : {selected_lora_main_sub}")
 
                 newkey = selected_lora_main_sub
+                safeloraname = newkey.replace('.', '_')
 
-                shared.model.load_adapter(lora_path, newkey)
+                shared.model.load_adapter(lora_path, safeloraname)
                 loras_after =  get_loaded_adapters()
                 if loras_before == loras_after:
                     print("No Lora Added")
@@ -640,41 +747,44 @@ def set_adapter(item):
     if hasattr(shared.model, 'set_adapter') and hasattr(shared.model, 'active_adapter'):
         #if prior_set:
 
-        if hasattr(shared.model.base_model, 'model'):
-            modelbasetype = shared.model.base_model.__class__.__name__
+        if hasattr(shared.model, 'base_model'):
+            if hasattr(shared.model.base_model, 'model'):
+                modelbasetype = shared.model.base_model.__class__.__name__
+            else:
+                modelbasetype = 'None'
         else:
-            modelbasetype = 'None'
+            modelbasetype = 'None'        
 
         modeltype = shared.model.__class__.__name__
-        if not hasattr(shared.model.base_model, 'disable_adapter_layers'):
-            
-            print(f"{RED} ERROR {RESET} {YELLOW}{modeltype}{RESET} ({modelbasetype}) is not PEFT model (PeftModelForCausalLM). You need to Load Lora first.")
-            
-            return
 
-
-        if (item =='None' or item == None or item == ''):
-            shared.model.base_model.disable_adapter_layers()
-            print (f"{RED} [Disable]{RESET} Adapters in  {YELLOW}{modeltype}{RESET} ({modelbasetype})")   
-        else:
-            adapters = get_loaded_adapters()
-            
-            if item in adapters:
-                shared.model.set_adapter(item)
-                if hasattr(shared.model.base_model, 'enable_adapter_layers'):
-                    shared.model.base_model.enable_adapter_layers()
-                    print (f"{GREEN} [Enable]{RESET} {shared.model.active_adapter} in {YELLOW}{modeltype}{RESET} ({modelbasetype})")
-                else:
-                     print(f"{RED} ERROR {RESET} {YELLOW}{modeltype}{RESET} with base {YELLOW}{modelbasetype}{RESET} is not correct PEFT model.")
-
-            else:
-                print (f"No or unknown Adapter {item} in {adapters}")
+        if hasattr(shared.model, 'base_model'):
+            if not hasattr(shared.model.base_model, 'disable_adapter_layers'):
+                print(f"{RED} ERROR {RESET} {YELLOW}{modeltype}{RESET} ({modelbasetype}) is not PEFT model (PeftModelForCausalLM). You need to Load Lora first.")
                 
+                return
+
+            if (item =='None' or item == None or item == ''):
                 shared.model.base_model.disable_adapter_layers()
-                print (f"{RED} [Disable]{RESET} Adapters in {YELLOW}{modeltype}{RESET} ({modelbasetype})")   
-        
+                print (f"{RED} [Disable]{RESET} Adapters in  {YELLOW}{modeltype}{RESET} ({modelbasetype})")   
+            else:
+                adapters = get_loaded_adapters()
+                
+                if item in adapters:
+                    shared.model.set_adapter(item)
+                    if hasattr(shared.model.base_model, 'enable_adapter_layers'):
+                        shared.model.base_model.enable_adapter_layers()
+                        print (f"{GREEN} [Enable]{RESET} {shared.model.active_adapter} in {YELLOW}{modeltype}{RESET} ({modelbasetype})")
+                    else:
+                        print(f"{RED} ERROR {RESET} {YELLOW}{modeltype}{RESET} with base {YELLOW}{modelbasetype}{RESET} is not correct PEFT model.")
+
+                else:
+                    print (f"No or unknown Adapter {item} in {adapters}")
+                    
+                    shared.model.base_model.disable_adapter_layers()
+                    print (f"{RED} [Disable]{RESET} Adapters in {YELLOW}{modeltype}{RESET} ({modelbasetype})")   
+            
     else:
-        print(f" Wrong model {shared.model.__class__.__name__}, it has no support for adapters")                
+        print(f"{shared.model.__class__.__name__} has no support for switching adapters")                
           
         
 
@@ -742,6 +852,7 @@ def ui():
                         gr_EditNameLora = gr.Textbox(value='',lines=4,visible=False, label='Edit LORA Note')
                         gr_EditNoteSaveLora = gr.Button(value='Save Note',visible=False,variant="primary")
                         gr_EditNameCancelLora = gr.Button(value='Cancel',visible=False)
+                        gr_Folder_comment = gr.Markdown('')
             with gr.Column():
                 with gr.Row():    
                     with gr.Column(scale = 3):
@@ -760,6 +871,7 @@ def ui():
                         lora_Rename = gr.Button(value='Rename Checkpoint')
                         lora_Note = gr.Button(value='Edit Checkpoint Note')
                         lora_all_Note = gr.Button(value='Edit Folder Note')
+                        lora_info = gr.Button(value='Lora Info')
                         gr.Markdown(' ')
                         refresh_all = gr.Button(value='Refresh', variant="secondary")
 
@@ -801,14 +913,14 @@ def ui():
         struct_params['subfolders_SEL'] = ""
         choices = get_root_list()
 
-        return gr.Radio.update(choices=choices, value=''), gr.Radio.update(choices=["None"], value=''), gr.Radio.update(choices=[], value=''),textfile,struct_params['selected_template']
+        return gr.Radio.update(choices=choices, value=''), gr.Radio.update(choices=["None"], value=''), gr.Radio.update(choices=[], value=''),textfile,struct_params['selected_template'],''
 
     def update_dropdown():
         templates = get_available_templates()
         return gr.Dropdown.update(choices=templates, value=struct_params['selected_template'])
 
     gr_setup_APPLY.click(save_template, [gr_setup,gr_setup_templName], None).then(
-        reload_tree, None, [gr_ROOT_radio, gr_FOLDER_radio, gr_SUBFOLDER_radio,gr_setup,gr_setup_templName]).then(update_dropdown,None,para_templates_drop)
+        reload_tree, None, [gr_ROOT_radio, gr_FOLDER_radio, gr_SUBFOLDER_radio,gr_setup,gr_setup_templName,gr_Folder_comment]).then(update_dropdown,None,para_templates_drop)
 
     def refresh_Lorafolders(must_include):
         model_dir = shared.args.lora_dir 
@@ -841,7 +953,7 @@ def ui():
     gr_setup_REFRESH.click(refresh_Lorafolders,gr_setup_search, gr_setup_folders)
 
     para_templates_drop.change(lambda x: struct_params.update({"selected_template": x}), para_templates_drop, None).then(
-        reload_tree, None, [gr_ROOT_radio, gr_FOLDER_radio, gr_SUBFOLDER_radio,gr_setup,gr_setup_templName])
+        reload_tree, None, [gr_ROOT_radio, gr_FOLDER_radio, gr_SUBFOLDER_radio,gr_setup,gr_setup_templName,gr_Folder_comment])
 
     def update_lotra_subs():
         global struct_params
@@ -855,12 +967,13 @@ def ui():
         return gr.Radio.update(choices=[], value ='')    
 
 
-    gr_ROOT_radio.change(lambda x: struct_params.update({"root_SEL": x}), gr_ROOT_radio, None).then(update_folders, None, gr_FOLDER_radio, show_progress=False)
+    gr_ROOT_radio.change(lambda x: struct_params.update({"root_SEL": x}), gr_ROOT_radio, None).then(update_folders, None, gr_FOLDER_radio, show_progress=False).then(display_comment,None, gr_Folder_comment, show_progress=False)
 
     gr_FOLDER_radio.change(lambda x: struct_params.update({"folders_SEL": x}), gr_FOLDER_radio, None).then(
         update_lotra_subs, None, gr_SUBFOLDER_radio, show_progress=False).then(
         load_note,None,gr_displayLine2, show_progress=False).then(
         load_log,None,gr_displayLine, show_progress=False).then(
+        display_comment,None, gr_Folder_comment, show_progress=False).then(     
         partial(write_status, text='Selection changed'),None,status_text,show_progress=False)
         
 
@@ -1060,7 +1173,7 @@ def ui():
 
 
     gr_setup_APPLY.click(save_template, [gr_setup,gr_setup_templName], None).then(
-        reload_tree, None, [gr_ROOT_radio, gr_FOLDER_radio, gr_SUBFOLDER_radio,gr_setup,gr_setup_templName]).then(
+        reload_tree, None, [gr_ROOT_radio, gr_FOLDER_radio, gr_SUBFOLDER_radio,gr_setup,gr_setup_templName,gr_Folder_comment]).then(
         update_dropdown,None,para_templates_drop)
 
     def reload_tree_all():
@@ -1085,9 +1198,10 @@ def ui():
         update_activeAdapters,None, gr_Loralmenu).then(
         load_note,None,gr_displayLine2).then(
         load_log,None,gr_displayLine).then(
+        display_comment,None, gr_Folder_comment).then(
         partial(write_status, text='Refreshed'),None,status_text)
      
-
+    lora_info.click(load_training_param,None,gr_displayLine)
 
     #gr_set_ROOT.change(lambda x: struct_params.update({"root_folders": x}), gr_set_ROOT, None)
 
