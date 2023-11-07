@@ -1,7 +1,7 @@
 This is a collection
 + you need to add actual LORA folders here
-+ <lora_folder 1>
-+ <lora_folder 2>
++ <lora_folder 1>  #This is a comment
++ <lora_folder 2>  #this is another comment
 
 Another Collection
 + this thing makes no sense without actual files
