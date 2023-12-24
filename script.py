@@ -638,11 +638,23 @@ def Load_and_apply_lora():
                         # shared.model may no longer be PeftModel
                 print("LORA -> Transformers [PEFT]") 
 
+                # use unload - unload doesn't actually work? The adapters are not really deleted. WTF
+                #modeltype = shared.model.__class__.__name__
+                #if hasattr(shared.model,'unload'):
+                #    print (f"{RED} Unloading PEFT adapter{RESET} from model {YELLOW}{modeltype}{RESET}") 
+                #    shared.model = shared.model.unload()
+                #else:
+                #    print(f"Starting from {YELLOW}clean{RESET} model {YELLOW}{modeltype}{RESET}") 
+
+
                 if hasattr(shared.model, 'disable_adapter'):
                     print (RED+"Disable PEFT adapter"+RESET)  
                     shared.model.disable_adapter()
-                    #delete_All_ButFirst()
-                    #shared.model = shared.model.base_model.model.unload()
+                    adapters = list(shared.model.peft_config.keys())
+                    for adapter in adapters:
+                        print(f"Deleting {RED}{adapter}{RESET}")  
+                        shared.model.delete_adapter(adapter)
+
                     
                 modeltype = shared.model.__class__.__name__
 
@@ -658,7 +670,7 @@ def Load_and_apply_lora():
                     print(f"Note: {modeltype} has no base_model") 
 
                 modeltype = shared.model.__class__.__name__
-                print(f"Creating {RED}PEFT{RESET} model for {YELLOW}{modeltype}{RESET}")
+                print(f"Creating {GREEN}PEFT{RESET} model for {YELLOW}{modeltype}{RESET}")
 
             #if len(loras_before) == 0:
             add_lora_to_model(selected_lora_main_sub)
