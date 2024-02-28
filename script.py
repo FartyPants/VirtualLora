@@ -5,7 +5,8 @@ from pathlib import Path
 import json
 from peft import PeftModel
 import modules.shared as shared
-from modules.LoRA import add_lora_autogptq, add_lora_exllama, add_lora_exllamav2
+from modules.LoRA import add_lora_autogptq, add_lora_exllamav2
+# add_lora_exllama removed
 import torch
 from datetime import datetime
 from functools import partial
@@ -572,10 +573,12 @@ def get_available_adapters_ui():
 
 
 def add_lora_to_model(lora_name):
+    #elif shared.model.__class__.__name__ in ['ExllamaModel', 'ExllamaHF'] or shared.args.loader == 'ExLlama':
+    #    add_lora_exllama([lora_name])
+
+
     if 'GPTQForCausalLM' in shared.model.__class__.__name__ or shared.args.loader == 'AutoGPTQ':
         add_lora_autogptq([lora_name])
-    elif shared.model.__class__.__name__ in ['ExllamaModel', 'ExllamaHF'] or shared.args.loader == 'ExLlama':
-        add_lora_exllama([lora_name])
     elif shared.model.__class__.__name__ in ['Exllamav2Model', 'Exllamav2HF'] or shared.args.loader == ['ExLlamav2', 'ExLlamav2_HF']:
         add_lora_exllamav2([lora_name])
     else:
