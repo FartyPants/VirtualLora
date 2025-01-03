@@ -8,6 +8,10 @@ It has to be in extensions/VirtualLora
 
 (it has hardcoded folders so don;t change VirtualLora)
 
+News: Added Strngth for Lora (must ve set before hitting Load lora)
+![image](https://github.com/user-attachments/assets/5de205bb-890c-4299-919f-6332bf068de8)
+
+
 ![image](https://github.com/FartyPants/VirtualLora/assets/23346289/2aa0d0d6-7288-4179-99e7-d8e60c8187be)
 
 This is to create your own collection folders to sort hundreds of Loras the way you want
