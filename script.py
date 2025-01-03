@@ -1,6 +1,7 @@
 import gradio as gr
 import re
 import os
+import shutil
 from pathlib import Path
 import json
 from peft import PeftModel
@@ -35,6 +36,7 @@ struct_params = {
     "subfolders_SEL": "None",
     "selected_template": "Latest",
     "sort_by_date": False,
+    "strength": 100
 }
 
 RED = "\033[91m"
@@ -433,6 +435,7 @@ def load_training_param():
     return table_html  
 
 def load_log():
+    global struct_params
 
     selected_lora_main = struct_params["folders_SEL"]
     selected_lora_sub = struct_params['subfolders_SEL'] 
@@ -442,10 +445,13 @@ def load_log():
 
     adapter_params = None
     new_params = None
+    old_adapter_params = None
 
     path = path_to_LORA(selected_lora_main,selected_lora_sub)
     full_path = Path(f"{shared.args.lora_dir}/{path}/training_log.json")
     full_pathAda = Path(f"{shared.args.lora_dir}/{path}/adapter_config.json")
+    full_pathorig = Path(f"{shared.args.lora_dir}/{path}/adapter_config_BK.json")
+
     try:
         with open(full_pathAda, 'r') as json_file:
             adapter_params = json.load(json_file)
@@ -462,6 +468,38 @@ def load_log():
             new_params = json.load(json_file)
     except FileNotFoundError: 
         pass
+
+    # check if full_pathorig exists
+    
+    if full_pathorig.is_file():
+        with open(full_pathorig, 'r') as json_file:
+            old_adapter_params = json.load(json_file)
+ 
+    # get 'lora_alpha' in new_params
+
+    current_alpha = 0
+    main_alpha = 0
+
+    if adapter_params:
+        if 'lora_alpha' in adapter_params:
+            current_alpha = adapter_params['lora_alpha']
+
+    # if old_adapter_params then replace lora_alpha in adapter_params with lora_alpha from old_adapter_params
+    if old_adapter_params and adapter_params:
+        if 'lora_alpha' in old_adapter_params:
+            old_alpha = old_adapter_params['lora_alpha']
+            adapter_params['lora_alpha'] = old_alpha
+
+    # set struct_params strength
+    if adapter_params:
+        if 'lora_alpha' in adapter_params:
+            main_alpha = adapter_params['lora_alpha']
+
+    struct_params['strength'] = 100
+
+    if current_alpha > 0 and main_alpha > 0 and main_alpha != current_alpha:
+        struct_params['strength'] = int((current_alpha/main_alpha)*100)
+
 
     row_one = '<tr style="text-align: center;">'
     row_two = '<tr style="text-align: center;">'
@@ -504,8 +542,7 @@ def load_log():
 
                     row_two += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">{value}</td>'
                     
-
-  
+ 
     if new_params and adapter_params:
         keys_to_include = ['r', 'lora_alpha']
         for key, value in adapter_params.items():
@@ -517,9 +554,9 @@ def load_log():
                 elif isinstance(value, float):
                     value = f'{value:.2}'
                 row_two += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">{value}</td>'
-               
+
     if new_params==None and adapter_params:
-        keys_to_include = ['base_model_name_or_path','r', 'lora_alpha', 'target_modules']
+        keys_to_include = ['base_model_name_or_path','r', 'lora_alpha', 'c_alpha', 'target_modules']
         row_one += f'<th style="border: 1px solid gray; padding: 8px; text-align: center; background-color: #8E2438; color: white;">No log file</th>'
         row_two += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">training_log.json</td>'
         for key, value in adapter_params.items():
@@ -532,6 +569,10 @@ def load_log():
                     value = f'{value:.2}'
                 row_two += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">{value}</td>'
                 
+    # if current_alpha > 0 and main_alpha > 0 and main_alpha != current_alpha then add another column but red
+    if current_alpha > 0 and main_alpha > 0 and main_alpha != current_alpha:
+        row_one += f'<th style="border: 1px solid gray; padding: 8px; text-align: center; background-color: #8E2438; color: white;">alpha</th>'
+        row_two += f'<td style="border: 1px solid gray; padding: 8px; text-align: center;">{current_alpha}</td>'
 
     row_one += '</tr>'        
     row_two += '</tr>'
@@ -613,6 +654,85 @@ def add_lora_to_model(lora_name):
             print(f"{RED}Adapter file (adapter_model.bin) doesn't exist in {RESET}{lora_path}")          
 
 
+
+def set_strength():
+    global struct_params
+
+    strength = struct_params['strength']/100.0
+
+    selected_lora_main = struct_params["folders_SEL"]
+    selected_lora_sub = struct_params['subfolders_SEL'] 
+    path = path_to_LORA(selected_lora_main, selected_lora_sub)
+
+    lora_path = Path(f"{shared.args.lora_dir}/{path}")
+
+    #first check if adapter_config_BK.json exist and if not copy adapter_config.json to adapter_config_BK.json
+    if os.path.isfile(f"{lora_path}/adapter_config.json"):
+        if not os.path.isfile(f"{lora_path}/adapter_config_BK.json"):
+            os.system(f"cp {lora_path}/adapter_config.json {lora_path}/adapter_config_BK.json")
+            # change the time to the same as adapter_config.json
+           
+            # Define the paths
+            reference_file = f"{lora_path}/adapter_config.json"
+            target_file = f"{lora_path}/adapter_config_BK.json"
+
+            # Get the timestamps of the reference file
+            stat = os.stat(reference_file)
+
+            # Apply the same timestamps to the target file
+            os.utime(target_file, (stat.st_atime, stat.st_mtime))
+
+            print(f"{RED}adapter_config_BK.json created {RESET}")
+
+    old_adapter_params = None
+    new_params = None
+
+    if os.path.isfile(f"{lora_path}/adapter_config_BK.json"):
+        with open(f"{lora_path}/adapter_config_BK.json", 'r') as json_file:
+            old_adapter_params = json.load(json_file)
+            #print(f"{YELLOW}Original Adapter parameters in {RESET}{lora_path}/adapter_config_BK.json")
+
+    # get the current adapter parameters
+    if os.path.isfile(f"{lora_path}/adapter_config.json"):
+        with open(f"{lora_path}/adapter_config.json", 'r') as json_file:
+            new_params = json.load(json_file)
+            #print(f"{YELLOW}Current Adapter parameters in {RESET}{lora_path}/adapter_config.json")
+
+    # find lora_alpha in old_adapter_params
+    
+    if old_adapter_params and new_params:
+        if 'lora_alpha' in old_adapter_params:
+            old_alpha = old_adapter_params['lora_alpha']
+            print(f"Original alpha: {old_alpha}")
+         
+            new_alpha = int(old_alpha * strength)
+            print(f"New alpha: {new_alpha}")
+            # update new_params with new_alpha
+            if new_params:
+                # check if we actually need to resave 
+                if new_alpha != new_params['lora_alpha']:
+                    new_params['lora_alpha'] = new_alpha
+                    with open(f"{lora_path}/adapter_config.json", 'w') as json_file:
+                        json.dump(new_params, json_file,indent=2)
+
+                    # set the time to the same as adapter_config_BK.json
+
+                    # Define the paths
+                    reference_file = f"{lora_path}/adapter_config_BK.json"
+                    target_file = f"{lora_path}/adapter_config.json"
+
+                    # Get the timestamps of the reference file
+                    stat = os.stat(reference_file)
+
+                    # Apply the same timestamps to the target file
+                    os.utime(target_file, (stat.st_atime, stat.st_mtime))
+                   
+                    print(f"{GREEN}Updated alpha in {RESET}adapter_config.json")
+                else:
+                    print(f"{YELLOW}No change in alpha in {RESET}adapter_config.json")
+
+
+
 def Load_and_apply_lora():
 
     selected_lora_main = struct_params["folders_SEL"]
@@ -626,6 +746,8 @@ def Load_and_apply_lora():
             
         if shared.model_name!='None' and shared.model_name!='':
             yield (f"Applying the following LoRAs to {shared.model_name} : {selected_lora_main_sub}")
+
+            set_strength()
 
             shared.lora_names = []
             loras_before = get_loaded_adapters()
@@ -884,6 +1006,7 @@ def ui():
                         gr_EditNameCancel = gr.Button(value='Cancel',visible=False)
 
                     with gr.Column(scale = 1):
+                        gr_strength = gr.Slider(value=struct_params['strength'], min=0, max=100, step=1, label='Strength %', interactive=True)
                         lora_Load = gr.Button(value='Load LoRA', variant="primary")
                         lora_Add = gr.Button(value='+ Add LoRA')
                         gr.Markdown(' ')
@@ -914,6 +1037,10 @@ def ui():
 
     with gr.Row():
         status_text = gr.Markdown(value=str_status_text)
+
+    def update_slider():
+        global struct_params
+        return struct_params['strength']        
 
     def update_folders():
         value = struct_params['root_SEL']
@@ -993,12 +1120,13 @@ def ui():
         update_lotra_subs, None, gr_SUBFOLDER_radio, show_progress=False).then(
         load_note,None,gr_displayLine2, show_progress=False).then(
         load_log,None,gr_displayLine, show_progress=False).then(
+        update_slider,None,gr_strength, show_progress=False).then(  
         display_comment,None, gr_Folder_comment, show_progress=False).then(     
         partial(write_status, text='Selection changed'),None,status_text,show_progress=False)
-        
 
     gr_SUBFOLDER_radio.change(lambda x: struct_params.update({"subfolders_SEL": x}), gr_SUBFOLDER_radio, None).then(
         load_log,None,gr_displayLine, show_progress=False).then(
+        update_slider,None,gr_strength, show_progress=False).then(    
         partial(write_status, text='Selection changed'),None,status_text,show_progress=False)
 
     def show_edit_rename():
@@ -1119,6 +1247,7 @@ def ui():
     gr_EditNameSave.click(rename_chkp,gr_EditName,[gr_displayLine,gr_EditName,gr_EditNameSave,gr_EditNameCancel]).then(
         refresh_lotra_subs, None, gr_SUBFOLDER_radio, show_progress=False).then(
         load_log,None,gr_displayLine, show_progress=False).then(
+        update_slider,None,gr_strength, show_progress=False).then(      
         partial(write_status, text='Renamed'),None,status_text,show_progress=False)
     
     lora_Rename.click(show_edit_rename,None,[gr_EditName,gr_EditNameSave,gr_EditNameCancel])
@@ -1126,10 +1255,13 @@ def ui():
 
     gr_EditNoteSave.click(save_note,gr_EditName,[gr_displayLine,gr_EditName,gr_EditNoteSave,gr_EditNameCancel]).then(
         load_log,None,gr_displayLine, show_progress=False).then(
+        update_slider,None,gr_strength, show_progress=False).then(      
         partial(write_status, text='Checkpoint Note Saved'),None,status_text,show_progress=False)
     
     lora_Note.click(show_edit_Note,None,[gr_EditName,gr_EditNoteSave,gr_EditNameCancel])
 
+    # when changing strenght gr_strength update the struct_params
+    gr_strength.change(lambda x: struct_params.update({"strength": x}), gr_strength, None)
 
     def show_edit_NoteLora():
         selected_lora_main = struct_params["folders_SEL"]
@@ -1179,10 +1311,12 @@ def ui():
 
 
     lora_Load.click(Load_and_apply_lora,None,status_text).then(save_pickle,None,None).then(
-        update_activeAdapters,None, gr_Loralmenu) 
+        update_activeAdapters,None, gr_Loralmenu).then(
+        load_log,None,gr_displayLine, show_progress=False)
 
     lora_Add.click(add_lora_to_PEFT,None,status_text).then(save_pickle,None,None).then(
-        update_activeAdapters,None, gr_Loralmenu)
+        update_activeAdapters,None, gr_Loralmenu).then(
+        load_log,None,gr_displayLine, show_progress=False)
 
     gr_Loralmenu_refresh.click(update_activeAdapters,None, gr_Loralmenu)
 
@@ -1218,6 +1352,7 @@ def ui():
         update_activeAdapters,None, gr_Loralmenu).then(
         load_note,None,gr_displayLine2).then(
         load_log,None,gr_displayLine).then(
+        update_slider,None,gr_strength, show_progress=False).then(      
         display_comment,None, gr_Folder_comment).then(
         partial(write_status, text='Refreshed'),None,status_text)
      
