@@ -669,9 +669,14 @@ def set_strength():
     #first check if adapter_config_BK.json exist and if not copy adapter_config.json to adapter_config_BK.json
     if os.path.isfile(f"{lora_path}/adapter_config.json"):
         if not os.path.isfile(f"{lora_path}/adapter_config_BK.json"):
-            os.system(f"cp {lora_path}/adapter_config.json {lora_path}/adapter_config_BK.json")
-            # change the time to the same as adapter_config.json
-           
+
+            # copy adapter_config.json to adapter_config_BK.json and give error if it fails
+            try:
+                shutil.copy(f"{lora_path}/adapter_config.json", f"{lora_path}/adapter_config_BK.json")
+                print(f"{RED}adapter_config_BK.json created {RESET}")
+            except:
+                print(f"{RED}Error: adapter_config_BK.json not created {RESET}")
+          
             # Define the paths
             reference_file = f"{lora_path}/adapter_config.json"
             target_file = f"{lora_path}/adapter_config_BK.json"
@@ -680,9 +685,12 @@ def set_strength():
             stat = os.stat(reference_file)
 
             # Apply the same timestamps to the target file
-            os.utime(target_file, (stat.st_atime, stat.st_mtime))
+            # make sure target_file exists
+            
+            if os.path.isfile(target_file):
+                os.utime(target_file, (stat.st_atime, stat.st_mtime))
 
-            print(f"{RED}adapter_config_BK.json created {RESET}")
+           
 
     old_adapter_params = None
     new_params = None
