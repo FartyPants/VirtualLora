@@ -637,7 +637,11 @@ def add_lora_to_model(lora_name):
 
         lora_path = Path(f"{shared.args.lora_dir}/{lora_name}")
         lora_path_bin = Path(f"{shared.args.lora_dir}/{lora_name}/adapter_model.bin")
+        # safetensors version
+        lora_path_sf = Path(f"{shared.args.lora_dir}/{lora_name}/adapter_model.safetensors")
 
+        if lora_path_sf.is_file():
+            lora_path_bin = lora_path_sf
         
         if lora_path_bin.is_file():
             safeloraname = lora_name.replace('.', '_')
@@ -653,7 +657,10 @@ def add_lora_to_model(lora_name):
         else:
             print(f"{RED}Adapter file (adapter_model.bin) doesn't exist in {RESET}{lora_path}")          
 
-
+# if old PEFT, you need to remove these form adapter_config.json
+#adapter_config.pop('eva_config', None)
+#adapter_config.pop('exclude_modules', None)
+#adapter_config.pop('lora_bias', None)
 
 def set_strength():
     global struct_params
