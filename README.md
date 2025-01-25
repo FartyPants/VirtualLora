@@ -6,9 +6,9 @@ extension for text WebUI
 
 It has to be in extensions/VirtualLora
 
-(it has hardcoded folders so don;t change VirtualLora)
+(it has hardcoded folders so don't change VirtualLora)
 
-News: Added Strngth for Lora (must ve set before hitting Load lora)
+News: Added Strength for Lora (must ve set before hitting Load lora)
 ![image](https://github.com/user-attachments/assets/5de205bb-890c-4299-919f-6332bf068de8)
 
 
