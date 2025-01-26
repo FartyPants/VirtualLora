@@ -6,11 +6,13 @@ from pathlib import Path
 import json
 from peft import PeftModel
 import modules.shared as shared
-from modules.LoRA import add_lora_autogptq, add_lora_exllamav2
+from modules.LoRA import add_lora_exllamav2
 # add_lora_exllama removed
 import torch
 from datetime import datetime
 from functools import partial
+from transformers import LlamaForCausalLM,AutoModelForCausalLM,AutoTokenizer
+from modules.models import unload_model
 
 try:
     from peft.config import PeftConfig
@@ -50,6 +52,8 @@ BYDATE2 = "[Last 10 dates]"
 refresh_symbol = '\U0001f504'  # 🔄
 
 str_status_text = 'Ready'
+
+last_loaded_lora_path = ''
 
 def get_file_path(filename):
     basepath = "extensions/VirtualLora/"+filename
@@ -611,6 +615,308 @@ def get_available_adapters_ui():
 
     return prior_set      
 
+def calc_trainable_parameters(model):
+    trainable_params = 0
+    all_param = 0 
+    for _, param in model.named_parameters():
+        num_params = param.numel()
+        # if using DS Zero 3 and the weights are initialized empty
+        if num_params == 0 and hasattr(param, "ds_numel"):
+            num_params = param.ds_numel
+
+        all_param += num_params
+        if param.requires_grad:
+            trainable_params += num_params
+    
+    return trainable_params,all_param
+
+def check_models():
+    # Initialize an empty HTML container
+    HTML_string = "<div><p>No model information available.</p></div>"
+
+    # Check if a model is loaded
+    if shared.model_name != 'None' and shared.model_name != '':
+        loras_before = get_loaded_adapters()
+
+        # Check if LORA adapters are loaded
+        if len(loras_before) == 0:
+            modeltype = shared.model.__class__.__name__
+            
+            HTML_string = (
+                "<div>"
+                "<p style='color: red;'><b>Warning:</b> No Lora's loaded yet.</p>"
+                "</div>"
+                "<table border='1' style='border-collapse: collapse; width: 100%;'>"
+                "<tr>"
+                "<th style='text-align: left; padding: 8px;'><b>Model</b></th>"
+                "<th style='text-align: left; padding: 8px;'><b>Model Base</b></th>"
+                "<th style='text-align: left; padding: 8px;'><b>Adapter</b></th>"
+                "</tr>"
+                "<tr>"
+                f"<td style='padding: 8px;'><span style='color: orange;'>{modeltype}</span></td>"
+                f"<td style='padding: 8px;'><span style='color: orange;'>None</span></td>"
+                f"<td style='padding: 8px;'><span style='color: orange;'>None</span></td>"
+                "</tr>"
+                "</table>"
+                "</div>"
+            )
+        else:
+            # Access the base model information
+            if hasattr(shared.model, 'base_model') and hasattr(shared.model.base_model, 'model'):
+                modelbasetype = shared.model.base_model.model.__class__.__name__
+                adapter_name = getattr(shared.model, 'active_adapter', 'None')
+
+                if adapter_name != 'None':
+                    # Access quantization configuration if available
+                    configdic = shared.model.config.to_dict()
+                    quant_config = configdic.get('quantization_config', {})
+                    load_in_4bit = quant_config.get('load_in_4bit', False)
+                    load_in_8bit = quant_config.get('load_in_8bit', False)
+
+                    # Generate warning messages based on quantization
+                    if load_in_4bit:
+                        HTML_string = (
+                            "<div>"
+                            "<b><span style='color: red;'>Warning!</span></b> You are merging a "
+                            "<b><span style='color: orange;'>4-bit quantized model</b></span>. This might have a significantly different outcome.</p>"
+                            "</div>"
+                        )
+                    elif load_in_8bit:
+                        HTML_string = (
+                            "<div>"
+                            "<b><span style='color: red;'>Warning!</span></b> You are merging a "
+                            "<b><span style='color: orange;'>8-bit quantized model</b></span>. This might have a significantly different outcome.</p>"
+                            "</div>"
+
+                        )
+                    else:
+                        HTML_string = (
+                            f"<div>"
+                            f"<p>Merging with BNB active. "
+                            f"<b>4-bit:</b> {load_in_4bit}, <b>8-bit:</b> {load_in_8bit}</p>"
+                            f"</div>"
+                        )
+
+                    modeltype = shared.model.__class__.__name__
+                    # Add model and adapter information
+                    HTML_string += (
+                        "<div>"
+                        "<table border='1' style='border-collapse: collapse; width: 100%;'>"
+                        "<tr>"
+                        "<th style='text-align: left; padding: 8px;'><b>Model</b></th>"
+                        "<th style='text-align: left; padding: 8px;'><b>Model Base</b></th>"
+                        "<th style='text-align: left; padding: 8px;'><b>Adapter</b></th>"
+                        "</tr>"
+                        "<tr>"
+                        f"<td style='padding: 8px;'><span style='color: orange;'>{modeltype}</span></td>"
+                        f"<td style='padding: 8px;'><span style='color: orange;'>{modelbasetype}</span></td>"
+                        f"<td style='padding: 8px;'><span style='color: orange;'>{adapter_name}</span></td>"
+                        "</tr>"
+                        "</table>"
+                        "</div>"
+)
+                else:
+                    # No LORA loaded error
+                    HTML_string = (
+                        "<div>"
+                        "<p style='color: red;'><b>Error:</b> No LORA loaded.</p>"
+                        "</div>"
+                    )
+    else:
+        # No model loaded fallback
+        HTML_string = (
+            "<div>"
+            "<p style='color: red;'><b>Warning:</b> No model loaded.</p>"
+            "</div>"
+        )
+
+    return HTML_string
+
+def dump_models(safetensors, output_dir):
+   if shared.model_name!='None' and shared.model_name!='':
+        modeltype = shared.model.__class__.__name__
+        print(f"{YELLOW}Re-saving model {RESET}{modeltype}")
+        print(f"Saving model in default shard size ... wait - don't touch anyhing yet!")
+        yield f"Saving model in default shard size ... wait - don't touch anyhing yet!"
+        LlamaForCausalLM.save_pretrained(shared.model, f"{output_dir}", safe_serialization=safetensors) #, state_dict=deloreanized_sd)
+        # save tokenizer
+        #tokenizer = AutoTokenizer.from_pretrained(path)
+        print(f"Saving tokenizer")
+        yield f"Saving tokenizer"
+        shared.tokenizer.save_pretrained(f"{output_dir}")
+        print(f"Done.")
+        yield f"Done. You need to reload the model now in Model tab."
+
+
+
+def merge_models(safetensors, output_dir):
+
+    if shared.model_name!='None' and shared.model_name!='':
+
+        loras_before = get_loaded_adapters()
+        if len(loras_before) == 0:
+            yield (f"No Lora's loaded yet")
+            return     
+      
+        modeltype = shared.model.__class__.__name__
+        
+        if hasattr(shared.model, 'base_model'):    
+            if hasattr(shared.model.base_model, 'model'):
+                modelbasetype = shared.model.base_model.model.__class__.__name__
+                adapter_name = getattr(shared.model,'active_adapter','None')
+                if adapter_name != 'None':
+
+                    if 'quantization_config' in shared.model.config.to_dict():
+                        configdic = shared.model.config.to_dict()
+                        load_in_4bit = configdic['quantization_config']['load_in_4bit']
+                        load_in_8bit = configdic['quantization_config']['load_in_8bit']
+                        if load_in_4bit:
+                            print(f"{RED}Warning! You are merging 4-bit quantized model.  This might have rather different outcome. {RESET}")
+                        elif load_in_8bit:
+                            print(f"{RED}Warning! You are merging 8-bit quantized model.  This might have rather different outcome. {RESET}")
+                        else:
+                            print(f"Merging with BNB active. {load_in_4bit} {load_in_8bit}")   
+
+
+                    print(f"{YELLOW}Merging model {RESET}{modeltype} on top of {modelbasetype} with adapter {GREEN}{adapter_name}{RESET}")
+                    model_trainable_params, model_all_params = calc_trainable_parameters(shared.model)
+                    print(f"Params: {model_trainable_params:,d} ({100 * model_trainable_params / model_all_params:.4f} %)")
+
+                    print(f"Running merge_and_unload")
+                    yield f"Running merge_and_unload"
+
+                    #shared.model.to('cpu')
+
+                    shared.model = shared.model.merge_and_unload()
+                    shared.model.train(False)
+                    print(f"Saving model in 10GB shard size ... wait - don't touch anyhing yet!")
+                    yield f"Saving model in 10GB shard size ... wait - don't touch anyhing yet!"
+                    LlamaForCausalLM.save_pretrained(shared.model, f"{output_dir}", safe_serialization=safetensors) #, state_dict=deloreanized_sd)
+
+                    # Write content to the merge file
+
+                    merge_file_path = os.path.join(output_dir, "_merge.txt")
+                    with open(merge_file_path, 'w') as merge_file:
+                        merge_file.write("This is a merge file content.\n")
+                        merge_file.write(f"Base Model: {shared.model_name}\n")
+
+                        # split lora_name to get the main and subfolder names
+                        lora_name_split = adapter_name.split('/')
+                        lora_name_only = lora_name_split[0]
+                        lora_sub = lora_name_split[1] if len(lora_name_split) > 1 else "Final"
+
+                        merge_file.write(f"LORA: {lora_name_only}\n")
+                        merge_file.write(f"Checkpoint: {lora_sub}\n")
+
+                   
+                    # save tokenizer
+                    #tokenizer = AutoTokenizer.from_pretrained(path)
+                    shared.tokenizer.save_pretrained(f"{output_dir}")
+                    print(f"Done.")
+                    yield f"Done. You need to reload the model now in Model tab."
+
+            else: 
+                print(f"{RED}Error - no PEFT model created for{RESET} {YELLOW}{modeltype}{RESET}")
+
+
+
+
+    else:
+        print(f"{RED}No model loaded{RESET}")
+        yield f"No model loaded"
+
+def merge_models_CPU(safetensors, output_dir):
+    global last_loaded_lora_path
+    # we need to reload model in CPU mode
+    max_memory = None
+
+    if shared.model_name!='None' and shared.model_name!='':
+        model_name = shared.model_name
+        print(f"Unloading model from memory")
+        unload_model()
+
+        base_model_name_or_path = Path(f'{shared.args.model_dir}/{model_name}')
+
+        device_map_arg = {"": "cpu"}
+        print(f"Loading base model: {base_model_name_or_path}")
+        yield f"Loading base model: {base_model_name_or_path}"
+
+        base_model = AutoModelForCausalLM.from_pretrained(
+            base_model_name_or_path,
+            load_in_8bit=False,
+            torch_dtype=torch.float16,
+            device_map=device_map_arg,
+            return_dict=True,
+            max_memory=max_memory, 
+            )
+
+        lora_name = last_loaded_lora_path
+        lora_path = Path(f"{shared.args.lora_dir}/{lora_name}")
+        # Load the model in CPU mode
+
+        if os.path.isdir(lora_path):
+
+            model_trainable_params, model_all_paramsbase = calc_trainable_parameters(base_model)
+            print(f"Model Trainable params: {model_trainable_params:,d} ({100 * model_trainable_params / model_all_paramsbase:.4f} %), All params: {model_all_paramsbase:,d}")
+
+            yield (f"Applying the following LoRAs to {shared.model_name} : {lora_name}")
+            print(f"Applying the following LoRAs to {shared.model_name} : {lora_name}")
+
+            shared.lora_names = []
+
+
+            lora_model = PeftModel.from_pretrained(
+                    base_model,
+                    lora_path,
+                    device_map=device_map_arg,
+                    torch_dtype=torch.float16,
+                    max_memory=max_memory,
+                )
+
+
+            model_trainable_params, model_all_params = calc_trainable_parameters(lora_model)
+            print(f"LoRA  Trainable params: {model_trainable_params:,d} ({100 * model_trainable_params / model_all_params:.4f} %), Params with Lora: {model_all_params:,d} from {model_all_paramsbase:,d}")
+
+            # merge weights - new merging method from peft
+            print(f"Running merge_and_unload")
+            yield f"Running merge_and_unload - wait"
+            lora_model = lora_model.merge_and_unload()
+            lora_model.train(False)
+            print(f"Saving model in 10GB shard size ... wait - don't touch anyhing yet!")
+            yield f"Saving model in 10GB shard size ... wait - don't touch anyhing yet!"
+            LlamaForCausalLM.save_pretrained(base_model, f"{output_dir}", safe_serialization=safetensors) #, state_dict=deloreanized_sd)
+
+            # save tokenizer
+            tokenizer_path = base_model_name_or_path 
+            #os.path.join(base_model_name_or_path, "tokenizer.model")
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+            tokenizer.save_pretrained(f"{output_dir}")
+            print(f"Model saved to {output_dir}")
+            yield f"Model saved to {output_dir}"
+        
+            # Write content to the merge file
+
+            merge_file_path = os.path.join(output_dir, "_merge.txt")
+            with open(merge_file_path, 'w') as merge_file:
+                merge_file.write("This is a merge file content.\n")
+                merge_file.write(f"Base Model: {model_name}\n")
+
+                # split lora_name to get the main and subfolder names
+                lora_name_split = lora_name.split('/')
+                lora_name_only = lora_name_split[0]
+                lora_sub = lora_name_split[1] if len(lora_name_split) > 1 else "Final"
+
+                merge_file.write(f"LORA: {lora_name_only}\n")
+                merge_file.write(f"Checkpoint: {lora_sub}\n")
+
+            print(f"**** DONE ****")
+            yield f"**** DONE ****"
+
+    else:
+        print(f"{RED}Error: Model not loaded yet{RESET}")
+        yield f"Error: Model not loaded yet"
+
+    pass
 
 
 def add_lora_to_model(lora_name):
@@ -618,12 +924,11 @@ def add_lora_to_model(lora_name):
     #    add_lora_exllama([lora_name])
 
 
-    if 'GPTQForCausalLM' in shared.model.__class__.__name__ or shared.args.loader == 'AutoGPTQ':
-        add_lora_autogptq([lora_name])
-    elif shared.model.__class__.__name__ in ['Exllamav2Model', 'Exllamav2HF'] or shared.args.loader == ['ExLlamav2', 'ExLlamav2_HF']:
+    #if 'GPTQForCausalLM' in shared.model.__class__.__name__ or shared.args.loader == 'AutoGPTQ':
+    #    add_lora_autogptq([lora_name])
+    if shared.model.__class__.__name__ in ['Exllamav2Model', 'Exllamav2HF'] or shared.args.loader == ['ExLlamav2', 'ExLlamav2_HF']:
         add_lora_exllamav2([lora_name])
     else:
-        
         params = {}
         if not shared.args.cpu:
             if shared.args.load_in_4bit or shared.args.load_in_8bit:
@@ -749,10 +1054,12 @@ def set_strength():
 
 
 def Load_and_apply_lora():
-
+    global last_loaded_lora_path
     selected_lora_main = struct_params["folders_SEL"]
     selected_lora_sub = struct_params['subfolders_SEL'] 
     path = path_to_LORA(selected_lora_main, selected_lora_sub)
+    
+    last_loaded_lora_path = path
 
     lora_path = Path(f"{shared.args.lora_dir}/{path}")
     selected_lora_main_sub = path
@@ -854,10 +1161,13 @@ def Load_and_apply_lora():
     
 
 def add_lora_to_PEFT():
+    global last_loaded_lora_path
 
     selected_lora_main = struct_params["folders_SEL"]
     selected_lora_sub = struct_params['subfolders_SEL'] 
     path = path_to_LORA(selected_lora_main, selected_lora_sub)
+    
+    last_loaded_lora_path = path
 
     lora_path = Path(f"{shared.args.lora_dir}/{path}")
 
@@ -1049,6 +1359,23 @@ def ui():
         with gr.Row():
             gr_setup_APPLY = gr.Button("Save", variant='primary')
             gr_setup_REFRESH = gr.Button("Refresh")
+    with gr.Tab('Merge'):
+        merge_html = gr.HTML('Run Check First to see the info. Then Merge.')
+        with gr.Row():
+            with gr.Column(scale=1): 
+                merge_gr_check = gr.Button(value='Check Model')
+            with gr.Column(scale=5):    
+                gr.Markdown('Check loaded Model and Lora to avoid stupid mistakes')
+
+        merge_safetensor = gr.Checkbox(label="Safe Tensor", value=True)
+        merge_output_dir = gr.Textbox(label='Output Dir', info='The folder name of your merge (relative to text-generation-webui)', value='models/my_merged_model_HF')
+        gr.Markdown('After Merge, you should reload the model in the Model tab!')
+        with gr.Row():
+            merge_gr_apply = gr.Button(value='[GPU Merge] Merge currently loaded Model (at current quantization) and Lora')
+            merge_gr_apply_CPU = gr.Button(value='[CPU Merge] Reload Model in 16bit to CPU, apply last Lora and Merge')
+            merge_gr_apply_GPU_DUMP = gr.Button(value='[GPU Dump] Dump the loadded model with current quantisation to file')
+        merge_gr_out = gr.Markdown('')   
+
 
     with gr.Row():
         status_text = gr.Markdown(value=str_status_text)
@@ -1374,5 +1701,10 @@ def ui():
     lora_info.click(load_training_param,None,gr_displayLine)
 
     #gr_set_ROOT.change(lambda x: struct_params.update({"root_folders": x}), gr_set_ROOT, None)
+
+    merge_gr_apply.click(merge_models, [merge_safetensor, merge_output_dir], merge_gr_out)
+    merge_gr_apply_CPU.click(merge_models_CPU, [merge_safetensor, merge_output_dir], merge_gr_out)
+    merge_gr_apply_GPU_DUMP.click(dump_models, [merge_safetensor, merge_output_dir], merge_gr_out)
+    merge_gr_check.click(check_models, None, merge_html)
 
     
